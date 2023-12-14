@@ -32,7 +32,8 @@ def vectorRK4(Ei,Vi,Psii,cuti,bi,ti,dti):
         k4 = TDSE(Ei,Vi,Psii,cuti,bi+k3*dti,n,ti+dti)
         # print(k1,k2,k3,k4)
         bout[n] = bi[n] + dti*(k1+2*k2+2*k3+k4)/6
-    print("CYCLE",np.round(ti,2),"\tNORM",np.round(np.linalg.norm(bout),10))
+    if round(ti*1000)%100 == 0:
+        print("CYCLE",np.round(ti,2),"\tNORM",np.round(np.linalg.norm(bout),10))
     bout /= np.linalg.norm(bout) # TODO
     return bout
 
@@ -71,16 +72,16 @@ pureEvolution = False # ie only the exp(iomegat) and no time dep. pertuerbation,
 minSteps = 250
 
 # TDSE perturbation
-perturbationType = "GaussSqueeze"  # or Harmonic
-timespan = 5
+perturbationType = "Adiabatic"  # or Harmonic
+timespan = 32
 dt = .001
 tsteps = int(timespan/dt)
 # GaussSqueeze
-A = V0*4
-window = 5
+A0 = V0*4
+window = 1.5
 sigma = tsteps/window/window  # about the first windowth of time window perturbed
 # Harmonic
-omega = 1  # driving freq
+omega = np.sqrt(2) # driving freq hbar*omega
 
 # Build UnperterbedHamiltonian and Potential
 V = np.zeros((N))
@@ -106,12 +107,21 @@ if perturbationType == "GaussSqueeze":
         # if i > center:
         #     V_t[:,i] = V*A
         # else:
-        if True:
-            ampi = A*np.exp(-np.square((i-center)/sigma))
+        if i < center:
+            ampi = A0*np.exp(-np.square((i-center)/sigma))
+            V_t[:,i] = V*ampi
+        else:
             V_t[:,i] = V*ampi
 elif perturbationType == "Harmonic":
     for i in range(tsteps):
-        V_t[:,i] = A*np.cos(omega/c*x-omega*i*dt)
+        V_t[:,i] = A0*np.cos(omega*i*dt)*(np.sin(4*np.pi*omega/c*x)**2)
+elif perturbationType == "Adiabatic":
+    V1 = np.zeros((N))
+    for i in range(N):
+        xi = a*(i-N/2)/(N/2)
+        V1[i] = 2 * (.5 * xi + xi * np.sin(2 * xi))
+    for i in range(tsteps):
+        V_t[:,i] = i/tsteps*V1
 
 # Solve
 E, Psi = np.linalg.eigh(H_0)
@@ -160,13 +170,10 @@ mixed = np.where(b != 0)[0]
 print("Mixing Coeffs", mixed, b[mixed])
 print("MaxFreq", max(mixed), E[max(mixed)]/hbar)
 freqs = E[mixed]/hbar
-repeatFreq = getMinFreqTime(E,hbar,freqs)
-repeatFreq = min(freqs)
-print("Repeat Freq",repeatFreq)
-print("Repeat/Max",max(freqs)/repeatFreq)
+repeatFreq = E[0]
 
 # Plot and Animate
-skipFrames = 5
+skipFrames = 50
 if pureEvolution:
     minFrames = minSteps
 else:
@@ -178,13 +185,13 @@ else:
         bhold = b_evolve[:,frame].copy()
         bset = vectorRK4(E,V_t[:,frame],Psi,cutoff,bhold,dt*frame,dt)
         b_evolve[:,frame+1] = np.squeeze(bset)
-    print("Bevolution")
-    for i in range(minFrames):
-        print(b_evolve[list(range(cutoff)),i])
+    # print("Bevolution")
+    # for i in range(minFrames):
+    #     print(b_evolve[list(range(cutoff)),i])
 
 
-fig = plt.figure(figsize=(10,5))
-gs = gridspec.GridSpec(1, 2, width_ratios=[8, 1],wspace=0,hspace=0)
+fig = plt.figure(figsize=(5,5))
+gs = gridspec.GridSpec(1, 2, width_ratios=[8, 1],wspace=.1,hspace=0)
 ax = plt.subplot(gs[0])
 peakAmp = abs(np.max(Psi[:,mixed]))
 plt.ylim(-peakAmp,peakAmp)
@@ -192,10 +199,16 @@ line1, = ax.plot(x,np.real(Psi_0.T),label="Real")  # You can change np.sin(x) to
 line2, = ax.plot(x,np.imag(Psi_0.T),label="Imaginary")
 norm, = ax.plot(x,np.square(np.abs(Psi_0.T)),label="Norm")
 pot, = ax.plot(x,V,label="Potential")
+plt.title("Adiabatic Theorem")
+ax.set_xlabel("X")
+ax.set_ylabel("Wavefunction Amplitude")
+ax.yaxis.labelpad = 1
 ax_leg = plt.subplot(gs[1])
-time_label = ax_leg.text(0,.9,'',fontsize=16)
+ax_leg.set_xlabel("          0 2 4 6 8 10     \nnth State",fontsize=6)
+ax_leg.set_ylabel("Probability")
+time_label = ax.text(-10,.22,'',fontsize=16)
 cats = list(range(cutoff))
-b_plot = ax_leg.bar(cats,np.zeros((cutoff)))
+b_plot = ax_leg.bar(cats,np.zeros((cutoff)),tick_label=list(range(cutoff)))
 ax_leg.set_ylim(0,1)
 def init():
     line1.set_ydata(np.ma.array(x, mask=True))
@@ -235,11 +248,13 @@ def update(frame):
 
 print("Frames",minFrames)
 ani = animation.FuncAnimation(fig, update, frames=range(int(minFrames/skipFrames)), init_func=init, blit=True)
-ax_leg.legend([line1,line2,pot,norm],["Real","Imag.","Pot.","Norm"],loc='right')
+ax.legend([line1,line2,pot,norm],["Wavefxn: Real","Wavefxn: Imaginary","Perturbation","Norm Square"],loc='lower right')
+
 ax_leg.spines['top'].set_visible(False)
 ax_leg.spines['right'].set_visible(False)
 ax_leg.spines['bottom'].set_visible(False)
 ax_leg.spines['left'].set_visible(False)
+
 ax_leg.set_xticks([])
 ax_leg.set_yticks([])
 
@@ -250,5 +265,5 @@ else:
 if pureEvolution:
     name += "_analytic"
 else:
-    name += "_integrated_"+str(timespan)+perturbationType+"_"+str(np.round(A,2))+"_"+str(np.round(dt,3))
+    name += "_integrated_"+str(timespan)+perturbationType+"_"+str(np.round(A0,2))+"_"+str(np.round(dt,3))
 ani.save(folderOut + '\\TDSE_'+name+"_"+potType+'.gif', writer='pillow', fps=30)  # Adjust the filename and frame rate (fps) as needed
